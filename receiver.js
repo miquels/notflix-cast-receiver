@@ -5,14 +5,12 @@
 // old MPL player, and the newer Shaka player. The Shaka player is
 // only used for DASH and MPL for the rest (such as HLS).
 //
-// This code is a hack to route HLS streams to the built in Shaka
-// player instead of MPL. The main reason is 5.1 surround pass-through
-// support: Shaka has it, MPL does not.
+// In recent versions of the Chromecast firmware it is possible
+// configure the web receiver so that it uses Shaka for HLS playback.
 //
-
 // The version of shaka player included with the Chromecast firmware
-// is 3.0.x. In that version the DASH manifest parser does not know
-// about a lot oftrack properties (like 'FORCED', 'NAME' etc).
+// is 3.0.x. In that version the manifest parser does not know
+// about a lot of track properties (like 'FORCED', 'NAME' etc).
 // Because shaka is normally only used for dash, the firmware does not
 // even look at fields that are present in HLS manifests.
 //
@@ -25,6 +23,8 @@
 //
 // Then we also intercept MEDIA_INFO response messages to the cast sender, and
 // fix up the track definitions with the extra data we put in CHARACTERISTICS.
+//
+
 function manifestRewriter(m3u8) {
 
   // Split up the manifest into lines and parse them.
@@ -82,7 +82,7 @@ function manifestRewriter(m3u8) {
       }
     }
     lines[idx] = '#EXT-X-MEDIA:' + kvn.join(',');
-	numUpdated += 1;
+    numUpdated += 1;
   }
   if (numUpdated) {
     console.log(`manifestRewriter: updated ${numUpdated} lines in m3u8`);
@@ -111,7 +111,7 @@ function langTag(state, kv) {
   if (!state[key]) {
     state[key] = 1;
   } else {
-	tagSeq = state[key];
+  tagSeq = state[key];
     state[key] += 1;
   }
   
@@ -124,7 +124,7 @@ function langTag(state, kv) {
   let firstLetter = 88;
   if (tagSeq > 26) {
     tagseq -= 25;
-	firstLetter = 81;
+  firstLetter = 81;
   }
   if (tagSeq > 26) {
     tagSeq = 26;
@@ -167,8 +167,8 @@ function doTracksUpdate(resp) {
       if (obj.LANGUAGE) {
         t.language = obj.LANGUAGE;
       } else if (t.language && t.language.startsWith('und')) {
-	    t.language = null;
-	  }
+      t.language = null;
+    }
       if (obj.NAME) {
         t.name = obj.NAME;
       }
@@ -212,10 +212,21 @@ function start() {
   const options = new cast.framework.CastReceiverOptions();
   options.disableIdleTimeout = true;
   options.supportedCommands = cast.framework.messages.Command.ALL_BASIC_MEDIA;
+  options.useShakaForHls = true;
+  options.skipMplLoad = true;
 
-  // Shaka player options.
-  const shakaPlayerConfig = {
+  // Playback config.
+  const playbackConfig = new cast.framework.PlaybackConfig();
+  options.playbackConfig = playbackConfig;
+
+  // Set shaka player options.
+  playbackConfig.shakaConfig = {
     preferredAudioChannelCount: 6,
+  };
+
+  // Intercept http request to set custom headers.
+  playbackConfig.manifestRequestHandler = (request) => {
+    request.headers['x-application'] = 'Notflix';
   };
 
   // Load a debugging shaka player.
@@ -224,17 +235,14 @@ function start() {
   // options.shakaUrl = cdn + 'shaka-player/3.0.13/shaka-player.compiled.debug.js';
 
   // When the system is READY, monkey patch shaka.Player.
-  // We use it to:
-  // - configure shaka player
-  // - intercept and rewrite m3u8 manifest responses.
+  // We use it to intercept and rewrite m3u8 manifest responses.
   instance.addEventListener(cast.framework.system.EventType.READY, () => {
     interceptPlayerLoad(function() {
 
-      this.configure(shakaPlayerConfig);
       this.getNetworkingEngine().registerResponseFilter((type, response) => {
         if (type !== shaka.net.NetworkingEngine.RequestType.MANIFEST ||
-             (!response.uri.endsWith('master.m3u8') && !response.uri.endsWith('main.m3u8')) ||
-             (response.status && parseInt(response.status / 100, 10) !== 2)) {
+            (!response.uri.endsWith('master.m3u8') && !response.uri.endsWith('main.m3u8')) ||
+            (response.status && parseInt(response.status / 100, 10) !== 2)) {
            return;
         }
         // Guard against bugs / input that triggers bugs.
@@ -242,16 +250,17 @@ function start() {
           const m3u8 = manifestRewriter(shaka.util.StringUtils.fromUTF8(response.data));
           response.data = shaka.util.StringUtils.toUTF8(m3u8);
         } catch(e) {
-		  console.log('error while rewriting manifest:', e);
-		}
+          console.log('error while rewriting manifest:', e);
+        }
       });
 
-	  // On all manifest requests, add a custom header.
-      this.getNetworkingEngine().registerRequestFilter((type, request) => {
-        if (type === shaka.net.NetworkingEngine.RequestType.MANIFEST) {
-		   request.headers['x-application'] = 'Notflix';
-		}
-      });
+      // On all manifest requests, add a custom header.
+      // this.getNetworkingEngine().registerRequestFilter((type, request) => {
+      //   if (type === shaka.net.NetworkingEngine.RequestType.MANIFEST) {
+      //     request.headers['x-application'] = 'Notflix';
+      //   }
+      // });
+
     });
   });
 
@@ -262,21 +271,19 @@ function start() {
     tracksUpdater,
   );
 
-  // Intercept LOAD requests.
-  playerManager.setMessageInterceptor(cast.framework.messages.MessageType.LOAD, req => {
-    if (req.media) {
-      const contentId = req.media.contentId || '';
-      const contentUrl = req.media.contentUrl || '';
-      const m3u8 = new RegExp('\.m3u8(|\\?.*)$');
-      if (contentId.match(m3u8) || contentUrl.match(m3u8)) {
-	    // Setting content-type to DASH here forces the Chromecast
-		// firmware to handle the video with Shaka player. Shaka
-		// itself looks at the file extension first, mime-type second,
-		// so will actually play HLS.
-        req.media.contentType = 'application/dash+xml';
-      }
-	}
-    return req;
+  // When media is loaded, adjust text track style.
+  playerManager.addEventListener(
+    cast.framework.events.EventType.PLAYER_LOAD_COMPLETE, () => {
+      const textTracksManager = playerManager.getTextTracksManager();
+      let style = {
+        backgroundColor: "#00000000",
+        edgeColor: "#000000FF",
+        edgeType: "DROP_SHADOW",
+        fontFamily: "Droid Serif Regular",
+        fontScale: 1,
+        foregroundColor: "#FFFFFFFF",
+      };
+      textTracksManager.setTextTrackStyle(style);
   });
 
   // And start.
