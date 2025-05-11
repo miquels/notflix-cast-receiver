@@ -34,9 +34,8 @@ function start() {
   // options.shakaUrl = cdn + 'shaka-player/3.0.13/shaka-player.compiled.debug.js';
 
   // When media is loaded, adjust text track style.
-  /*
   instance.addEventListener(
-    cast.framework.events.EventType.PLAYER_LOAD_COMPLETE, () => {
+    cast.framework.events.EventType.TEXT_TRACKS_AVAILABLE, () => {
       const playerManager = instance.getPlayerManager();
       const textTracksManager = playerManager.getTextTracksManager();
       let style = {
@@ -50,7 +49,6 @@ function start() {
       textTracksManager.setTextTrackStyle(style);
     }
   );
-  */
 
   // And start.
   instance.start(options);
