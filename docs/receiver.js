@@ -1,10 +1,4 @@
 //
-// Custom web receiver for Notflix.
-//
-// Chromecast firmware actually comes with two players built-in, the
-// old MPL player, and the newer Shaka player. The Shaka player is
-// only used for DASH and MPL for the rest (such as HLS).
-//
 // In recent versions of the Chromecast firmware it is possible
 // configure the web receiver so that it uses Shaka for HLS playback.
 //
@@ -40,8 +34,9 @@ function start() {
   // options.shakaUrl = cdn + 'shaka-player/3.0.13/shaka-player.compiled.debug.js';
 
   // When media is loaded, adjust text track style.
-  playerManager.addEventListener(
+  instance.addEventListener(
     cast.framework.events.EventType.PLAYER_LOAD_COMPLETE, () => {
+      const playerManager = instance.getPlayerManager();
       const textTracksManager = playerManager.getTextTracksManager();
       let style = {
         backgroundColor: "#00000000",
@@ -52,7 +47,8 @@ function start() {
         foregroundColor: "#FFFFFFFF",
       };
       textTracksManager.setTextTrackStyle(style);
-  });
+    }
+  );
 
   // And start.
   instance.start(options);
