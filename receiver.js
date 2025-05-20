@@ -43,7 +43,7 @@ function start() {
         edgeColor: "#000000FF",
         edgeType: "DROP_SHADOW",
         fontFamily: "Droid Serif Regular",
-        fontGenericFamily: "serif",
+        fontGenericFamily: "SERIF",
         fontScale: 1,
         foregroundColor: "#FFFFFFFF",
       };
